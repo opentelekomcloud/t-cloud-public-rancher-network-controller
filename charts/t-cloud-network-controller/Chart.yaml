@@ -1,0 +1,7 @@
+apiVersion: v2
+name: t-cloud-network-controller
+description: Cluster-scoped shared network lifecycle controller for Rancher and T-Cloud
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+

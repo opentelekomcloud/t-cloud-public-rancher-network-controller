@@ -1,0 +1,73 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.otc.t-systems.com
+  resources:
+  - tcloudclusternetworks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.otc.t-systems.com
+  resources:
+  - tcloudclusternetworks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.otc.t-systems.com
+  resources:
+  - tcloudclusternetworks/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - provisioning.cattle.io
+  resources:
+  - clusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rke-machine.cattle.io
+  resources:
+  - opentelekomcloudmachines
+  verbs:
+  - get
+  - list
+  - watch

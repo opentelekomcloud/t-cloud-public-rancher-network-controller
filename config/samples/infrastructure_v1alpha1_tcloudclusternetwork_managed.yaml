@@ -1,0 +1,33 @@
+apiVersion: infrastructure.otc.t-systems.com/v1alpha1
+kind: TCloudClusterNetwork
+metadata:
+  name: test-de-network
+  namespace: fleet-default
+spec:
+  clusterRef:
+    name: test-de
+    namespace: fleet-default
+  credentialSecretRef:
+    name: cc-replace-me
+    namespace: cattle-global-data
+  managementPolicy: Managed
+  region: eu-de
+  projectName: replace-me
+  network:
+    vpc:
+      name: test-de
+      cidr: 192.168.0.0/16
+    subnet:
+      name: test-de
+      cidr: 192.168.0.0/24
+      gatewayIP: 192.168.0.1
+      dnsNameservers:
+        - 100.125.4.25
+        - 8.8.8.8
+    securityGroup:
+      name: test-de-rke2
+      cni: canal
+      sshAllowedCIDRs:
+        - 203.0.113.10/32
+  orphanCleanupAfter: 1h
+
