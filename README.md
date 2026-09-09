@@ -36,6 +36,10 @@ make docker-build IMG=ghcr.io/opentelekomcloud/t-cloud-public-rancher-network-co
 
 ## Installation
 
+For the recommended installation from Rancher's Apps UI, including release,
+verification, upgrade, and safe-uninstall steps, see
+[Install through the Rancher UI](docs/install-rancher-ui.md).
+
 With Kustomize:
 
 ```bash
