@@ -1,0 +1,17 @@
+domain: otc.t-systems.com
+layout:
+- go.kubebuilder.io/v4
+projectName: t-cloud-public-rancher-network-controller
+repo: github.com/opentelekomcloud/t-cloud-public-rancher-network-controller
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: otc.t-systems.com
+  group: infrastructure
+  kind: TCloudClusterNetwork
+  path: github.com/opentelekomcloud/t-cloud-public-rancher-network-controller/api/v1alpha1
+  version: v1alpha1
+version: "3"
+

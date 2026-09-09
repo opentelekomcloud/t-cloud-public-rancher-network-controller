@@ -1,1 +1,125 @@
-# t-cloud-public-rancher-network-controller
+# T-Cloud Rancher Network Controller
+
+Kubernetes controller that owns shared T-Cloud VPC, subnet, and security-group
+resources for Rancher-provisioned RKE2 clusters.
+
+The controller runs in Rancher's management cluster. Machine drivers continue
+to own machine-scoped resources such as instances and EIPs; this controller owns
+only resources represented by a `TCloudClusterNetwork` with
+`managementPolicy: Managed`.
+
+## Policies
+
+- `Managed` creates shared resources and deletes them when the network object is
+  deleted.
+- `Observe` validates existing resources and never deletes them.
+- `Abandon` is an administrator recovery option that releases the finalizer
+  without deleting cloud resources.
+
+Managed resources receive a name suffix derived from the Kubernetes object's
+UID. Cleanup verifies the stored ID, expected name, and `controllerManaged`
+status before issuing a delete operation.
+
+## Development
+
+```bash
+make all
+make test-race
+make manifests generate
+```
+
+Build the image:
+
+```bash
+make docker-build IMG=ghcr.io/opentelekomcloud/t-cloud-public-rancher-network-controller:dev
+```
+
+## Installation
+
+With Kustomize:
+
+```bash
+kubectl apply -k config
+```
+
+With Helm:
+
+```bash
+helm upgrade --install t-cloud-network-controller \
+  charts/t-cloud-network-controller \
+  --namespace cattle-tcloud-system \
+  --create-namespace
+```
+
+Install the controller before enabling managed networking in the Rancher UI
+extension. See `config/samples` for Managed and Observe examples.
+
+### Upgrade
+
+Review CRD changes before upgrading, then use the same installation method:
+
+```bash
+helm upgrade t-cloud-network-controller \
+  charts/t-cloud-network-controller \
+  --namespace cattle-tcloud-system \
+  --set image.repository=REGISTRY/t-cloud-public-rancher-network-controller \
+  --set image.tag=VERSION
+```
+
+Only one replica is active at a time because leader election is enabled. Keep
+the CRD installed while any `TCloudClusterNetwork` objects exist.
+
+### Uninstall
+
+Delete Rancher clusters and wait until their `TCloudClusterNetwork` resources
+and finalizers are gone before removing the controller. Then uninstall the
+workload and, only after confirming no network objects remain, delete the CRD:
+
+```bash
+kubectl get tcloudclusternetworks.infrastructure.otc.t-systems.com -A
+helm uninstall t-cloud-network-controller --namespace cattle-tcloud-system
+kubectl delete crd tcloudclusternetworks.infrastructure.otc.t-systems.com
+```
+
+Removing the controller or CRD first prevents managed cloud-network cleanup.
+
+## Deletion and recovery
+
+During deletion the controller waits for Rancher T-Cloud machine objects and
+attached cloud ports, then deletes the security group, subnet, and VPC in that
+order. A missing resource is treated as already deleted.
+
+If credentials are permanently unavailable, an administrator may patch a
+deleting object to `spec.managementPolicy: Abandon`. This intentionally leaves
+cloud resources behind and removes the finalizer on the next reconciliation.
+
+Do not manually remove
+`infrastructure.otc.t-systems.com/network-cleanup` unless the remaining cloud
+resources have been inspected and accepted as orphaned.
+
+Before rollback, keep the CRD and run the previous compatible controller image.
+If cleanup cannot be restored, switch an affected object to `Abandon`, record
+the VPC/subnet/security-group IDs from status, and arrange manual cleanup.
+
+## Security
+
+The controller reads referenced Rancher cloud-credential Secrets through an
+uncached API reader. Credentials are never stored in CR status or Kubernetes
+events. The ServiceAccount only has `get` access to Secrets.
+
+## Optional live smoke test
+
+This test creates billable cloud resources. Use a disposable project and a
+dedicated Rancher cloud credential:
+
+1. Install the controller and confirm its Deployment is available.
+2. Apply a copy of `config/samples/infrastructure_v1alpha1_tcloudclusternetwork_managed.yaml`
+   with unique CIDRs, names, cluster reference, and credential Secret reference.
+3. Wait for `Ready=True` and verify the three IDs in `.status.resources`.
+4. Delete the sample and verify, in order, that its security group, subnet, and
+   VPC disappear and that the Kubernetes object finalizes.
+5. Repeat with `managementPolicy: Observe`; deleting that object must leave all
+   referenced cloud resources intact.
+
+Never use `Abandon` as the normal uninstall path: it deliberately leaves cloud
+resources behind.

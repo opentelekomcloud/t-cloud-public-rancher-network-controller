@@ -1,0 +1,32 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "t-cloud-network-controller.fullname" . }}
+  labels:
+    {{- include "t-cloud-network-controller.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [infrastructure.otc.t-systems.com]
+    resources: [tcloudclusternetworks]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [infrastructure.otc.t-systems.com]
+    resources: [tcloudclusternetworks/status]
+    verbs: [get, update, patch]
+  - apiGroups: [infrastructure.otc.t-systems.com]
+    resources: [tcloudclusternetworks/finalizers]
+    verbs: [update]
+  - apiGroups: [provisioning.cattle.io]
+    resources: [clusters]
+    verbs: [get, list, watch]
+  - apiGroups: [rke-machine.cattle.io]
+    resources: [opentelekomcloudmachines]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+
