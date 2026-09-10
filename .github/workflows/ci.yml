@@ -35,3 +35,16 @@ jobs:
         run: |
           make generate manifests
           git diff --exit-code
+
+  eco_check:
+    name: check
+    if: >
+      always()
+    needs: [verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          allowed-skips: acc_tests
+          jobs: ${{ toJSON(needs) }}
