@@ -101,6 +101,7 @@ spec:
                         enum:
                         - canal
                         - flannel
+                        - calico
                         type: string
                       id:
                         type: string
