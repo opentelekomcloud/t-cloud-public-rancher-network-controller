@@ -56,7 +56,7 @@ type SecurityGroupSpec struct {
 	// +kubebuilder:validation:items:Format=cidr
 	// +kubebuilder:validation:MinItems=1
 	SSHAllowedCIDRs []string `json:"sshAllowedCIDRs,omitempty"`
-	// +kubebuilder:validation:Enum=canal;flannel
+	// +kubebuilder:validation:Enum=canal;flannel;calico
 	CNI string `json:"cni,omitempty"`
 }
 
