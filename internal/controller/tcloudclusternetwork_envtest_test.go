@@ -19,9 +19,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	infrav1 "github.com/opentelekomcloud/t-cloud-public-rancher-network-controller/api/v1alpha1"
+	cloudservice "github.com/opentelekomcloud/t-cloud-public-rancher-network-controller/internal/cloud"
 )
 
-func TestEnvtestManagedLifecycle(t *testing.T) {
+func TestEnvtestManagedAndAdoptLifecycle(t *testing.T) {
 	testEnvironment := &envtest.Environment{CRDDirectoryPaths: []string{
 		filepath.Join("..", "..", "config", "crd", "bases"),
 		filepath.Join("testdata", "crds"),
@@ -124,6 +125,71 @@ func TestEnvtestManagedLifecycle(t *testing.T) {
 	})
 	if len(cloud.deleted) != 3 {
 		t.Fatalf("expected all managed resources deleted, got %#v", cloud.deleted)
+	}
+
+	cloud.deleted = nil
+	cloud.resources["adopted-vpc"] = cloudservice.Resource{ID: "adopted-vpc", Name: "vpc-docker-machine"}
+	cloud.resources["adopted-subnet"] = cloudservice.Resource{ID: "adopted-subnet", Name: "subnet-docker-machine"}
+	cloud.resources["adopted-sg"] = cloudservice.Resource{ID: "adopted-sg", Name: "docker-machine"}
+	machine := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": tcloudMachineGVK.GroupVersion().String(),
+		"kind":       tcloudMachineGVK.Kind,
+		"metadata": map[string]interface{}{
+			"name":      "test-de-worker",
+			"namespace": "fleet-default",
+			"labels":    map[string]interface{}{clusterNameLabel: "test-de"},
+		},
+		"status": map[string]interface{}{"ready": true},
+	}}
+	if err := apiClient.Create(ctx, machine); err != nil {
+		t.Fatal(err)
+	}
+	if err := apiClient.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-de-worker-machine-state", Namespace: "fleet-default"},
+		Data:       map[string][]byte{"extractedConfig": machineStateArchive(t, "adopted-vpc", "adopted-subnet", "adopted-sg", true)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adopted := &infrav1.TCloudClusterNetwork{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-de-adopted-network", Namespace: "fleet-default"},
+		Spec: infrav1.TCloudClusterNetworkSpec{
+			ClusterRef:          infrav1.NamespacedReference{Name: "test-de", Namespace: "fleet-default"},
+			CredentialSecretRef: infrav1.NamespacedReference{Name: "cc-test", Namespace: "cattle-global-data"},
+			ManagementPolicy:    infrav1.ManagementPolicyAdopt,
+			Region:              "eu-de",
+			ProjectName:         "project",
+			Network: infrav1.NetworkSpec{
+				VPC:    infrav1.VPCSpec{},
+				Subnet: infrav1.SubnetSpec{},
+				SecurityGroup: infrav1.SecurityGroupSpec{
+					CNI: "calico", SSHAllowedCIDRs: []string{"203.0.113.5/32"},
+				},
+			},
+		},
+	}
+	if err := apiClient.Create(ctx, adopted); err != nil {
+		t.Fatal(err)
+	}
+	adoptedKey := types.NamespacedName{Name: adopted.Name, Namespace: adopted.Namespace}
+	eventually(t, 15*time.Second, func() bool {
+		value := &infrav1.TCloudClusterNetwork{}
+		return apiClient.Get(ctx, adoptedKey, value) == nil && conditionTrue(value, infrav1.ConditionReady) && value.Status.Resources.VPC.ID == "adopted-vpc"
+	})
+	if err := apiClient.Delete(ctx, machine); err != nil {
+		t.Fatal(err)
+	}
+	if err := apiClient.Get(ctx, adoptedKey, adopted); err != nil {
+		t.Fatal(err)
+	}
+	if err := apiClient.Delete(ctx, adopted); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 15*time.Second, func() bool {
+		err := apiClient.Get(ctx, adoptedKey, &infrav1.TCloudClusterNetwork{})
+		return apierrors.IsNotFound(err)
+	})
+	if len(cloud.deleted) != 3 {
+		t.Fatalf("expected all adopted resources deleted, got %#v", cloud.deleted)
 	}
 }
 

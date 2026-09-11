@@ -5,13 +5,15 @@ resources for Rancher-provisioned RKE2 clusters.
 
 The controller runs in Rancher's management cluster. Machine drivers continue
 to own machine-scoped resources such as instances and EIPs; this controller owns
-only resources represented by a `TCloudClusterNetwork` with
-`managementPolicy: Managed`.
+only resources represented by a controller-owned `TCloudClusterNetwork`.
 
 ## Policies
 
 - `Managed` creates shared resources and deletes them when the network object is
   deleted.
+- `Adopt` reads the oldest ready machine's Rancher machine-state Secret, verifies
+  that its VPC, subnet, and security group were created by the machine driver,
+  adds the requested CNI rules, and takes responsibility for deleting them.
 - `Observe` validates existing resources and never deletes them.
 - `Abandon` is an administrator recovery option that releases the finalizer
   without deleting cloud resources.
@@ -56,13 +58,15 @@ helm upgrade --install t-cloud-network-controller \
 ```
 
 Install the controller before enabling managed networking in the Rancher UI
-extension. See `config/samples` for Managed and Observe examples.
+extension. See `config/samples` for Managed, Adopt, and Observe examples.
 
 ### Upgrade
 
-Review CRD changes before upgrading, then use the same installation method:
+Helm does not upgrade files from a chart's `crds/` directory. Apply the new CRD
+manifest first, then upgrade the controller:
 
 ```bash
+kubectl apply -f charts/t-cloud-network-controller/crds/infrastructure.otc.t-systems.com_tcloudclusternetworks.yaml
 helm upgrade t-cloud-network-controller \
   charts/t-cloud-network-controller \
   --namespace cattle-tcloud-system \
@@ -107,9 +111,11 @@ the VPC/subnet/security-group IDs from status, and arrange manual cleanup.
 
 ## Security
 
-The controller reads referenced Rancher cloud-credential Secrets through an
-uncached API reader. Credentials are never stored in CR status or Kubernetes
-events. The ServiceAccount only has `get` access to Secrets.
+The controller reads referenced Rancher cloud-credential and machine-state
+Secrets through an uncached API reader. Adoption decodes only the network
+ownership fields from `config.json`; credentials and private keys are never
+stored in CR status, logs, or Kubernetes events. The ServiceAccount only has
+`get` access to Secrets.
 
 ## Optional live smoke test
 

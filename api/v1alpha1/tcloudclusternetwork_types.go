@@ -21,6 +21,7 @@ type ManagementPolicy string
 const (
 	ManagementPolicyManaged ManagementPolicy = "Managed"
 	ManagementPolicyObserve ManagementPolicy = "Observe"
+	ManagementPolicyAdopt   ManagementPolicy = "Adopt"
 	ManagementPolicyAbandon ManagementPolicy = "Abandon"
 )
 
@@ -68,6 +69,7 @@ type NetworkSpec struct {
 
 // +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Managed' || (has(self.network.vpc.cidr) && has(self.network.subnet.cidr) && has(self.network.subnet.gatewayIP) && size(self.network.securityGroup.sshAllowedCIDRs) > 0)",message="Managed policy requires VPC CIDR, subnet CIDR, gatewayIP, and at least one SSH allowed CIDR"
 // +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Observe' || (has(self.network.vpc.id) && has(self.network.subnet.id) && has(self.network.securityGroup.id))",message="Observe policy requires VPC, subnet, and security-group IDs"
+// +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Adopt' || (size(self.network.securityGroup.sshAllowedCIDRs) > 0)",message="Adopt policy requires at least one SSH allowed CIDR"
 // +kubebuilder:validation:XValidation:rule="self.clusterRef == oldSelf.clusterRef",message="clusterRef is immutable"
 // +kubebuilder:validation:XValidation:rule="self.region == oldSelf.region",message="region is immutable"
 // +kubebuilder:validation:XValidation:rule="self.projectName == oldSelf.projectName",message="projectName is immutable"
@@ -75,7 +77,7 @@ type TCloudClusterNetworkSpec struct {
 	ClusterRef          NamespacedReference `json:"clusterRef"`
 	CredentialSecretRef NamespacedReference `json:"credentialSecretRef"`
 	// +kubebuilder:default=Managed
-	// +kubebuilder:validation:Enum=Managed;Observe;Abandon
+	// +kubebuilder:validation:Enum=Managed;Observe;Adopt;Abandon
 	ManagementPolicy ManagementPolicy `json:"managementPolicy,omitempty"`
 	// +kubebuilder:validation:MinLength=1
 	Region      string `json:"region"`

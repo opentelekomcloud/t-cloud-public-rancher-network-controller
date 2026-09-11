@@ -91,6 +91,7 @@ spec:
                 enum:
                 - Managed
                 - Observe
+                - Adopt
                 - Abandon
                 type: string
               network:
@@ -172,6 +173,9 @@ spec:
             - message: Observe policy requires VPC, subnet, and security-group IDs
               rule: self.managementPolicy != 'Observe' || (has(self.network.vpc.id)
                 && has(self.network.subnet.id) && has(self.network.securityGroup.id))
+            - message: Adopt policy requires at least one SSH allowed CIDR
+              rule: self.managementPolicy != 'Adopt' || (size(self.network.securityGroup.sshAllowedCIDRs)
+                > 0)
             - message: clusterRef is immutable
               rule: self.clusterRef == oldSelf.clusterRef
             - message: region is immutable
