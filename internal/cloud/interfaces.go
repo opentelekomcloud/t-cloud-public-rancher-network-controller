@@ -4,8 +4,11 @@ import "context"
 
 type Credentials struct {
 	AuthURL      string
+	AuthMethod   string
 	Username     string
 	Password     string
+	AccessKey    string
+	SecretKey    string
 	DomainName   string
 	DomainID     string
 	ProjectName  string

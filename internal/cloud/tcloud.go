@@ -23,16 +23,7 @@ type tcloudService struct {
 }
 
 func (TCloudFactory) New(_ context.Context, credentials Credentials) (Service, error) {
-	provider, err := openstack.AuthenticatedClient(golangsdk.AuthOptions{
-		IdentityEndpoint: credentials.AuthURL,
-		Username:         credentials.Username,
-		Password:         credentials.Password,
-		DomainName:       credentials.DomainName,
-		DomainID:         credentials.DomainID,
-		TenantName:       credentials.ProjectName,
-		TenantID:         credentials.ProjectID,
-		AllowReauth:      true,
-	})
+	provider, err := openstack.AuthenticatedClient(authOptions(credentials))
 	if err != nil {
 		return nil, fmt.Errorf("authenticate with T-Cloud: %w", err)
 	}
@@ -56,6 +47,32 @@ func (TCloudFactory) New(_ context.Context, credentials Credentials) (Service, e
 	}
 
 	return &tcloudService{vpc: vpcClient, compute: computeClient, network: networkClient}, nil
+}
+
+func authOptions(credentials Credentials) golangsdk.AuthOptionsProvider {
+	if credentials.AuthMethod == "aksk" {
+		return golangsdk.AKSKAuthOptions{
+			IdentityEndpoint: credentials.AuthURL,
+			ProjectId:        credentials.ProjectID,
+			ProjectName:      credentials.ProjectName,
+			Region:           credentials.Region,
+			Domain:           credentials.DomainName,
+			DomainID:         credentials.DomainID,
+			AccessKey:        credentials.AccessKey,
+			SecretKey:        credentials.SecretKey,
+		}
+	}
+
+	return golangsdk.AuthOptions{
+		IdentityEndpoint: credentials.AuthURL,
+		Username:         credentials.Username,
+		Password:         credentials.Password,
+		DomainName:       credentials.DomainName,
+		DomainID:         credentials.DomainID,
+		TenantName:       credentials.ProjectName,
+		TenantID:         credentials.ProjectID,
+		AllowReauth:      true,
+	}
 }
 
 func endpointAvailability(value string) golangsdk.Availability {
