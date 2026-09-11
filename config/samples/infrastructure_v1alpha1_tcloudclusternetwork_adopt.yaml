@@ -1,0 +1,22 @@
+apiVersion: infrastructure.otc.t-systems.com/v1alpha1
+kind: TCloudClusterNetwork
+metadata:
+  name: replace-cluster-network
+  namespace: fleet-default
+spec:
+  clusterRef:
+    name: replace-cluster
+    namespace: fleet-default
+  credentialSecretRef:
+    name: cc-replace-me
+    namespace: cattle-global-data
+  managementPolicy: Adopt
+  region: eu-de
+  projectName: replace-me
+  network:
+    vpc: {}
+    subnet: {}
+    securityGroup:
+      cni: canal
+      sshAllowedCIDRs:
+        - 203.0.113.10/32

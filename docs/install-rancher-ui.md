@@ -95,10 +95,15 @@ then detect the CRD and enable **Managed** shared networking.
 
 ## Upgrade
 
-Publish a newer semantic release, refresh the repository under
-**Apps → Repositories**, then open **Apps → Installed Apps**, select the
-controller, and choose **Upgrade**. Review the version and values before
-confirming.
+Helm does not upgrade CRDs from a chart's `crds/` directory. Before upgrading
+the App, open Rancher's **local** cluster, choose **Import YAML**, and apply the
+new release's
+`charts/t-cloud-network-controller/crds/infrastructure.otc.t-systems.com_tcloudclusternetworks.yaml`.
+Confirm that `spec.versions[].schema` lists the `Adopt` management policy.
+
+Then refresh the repository under **Apps → Repositories**, open
+**Apps → Installed Apps**, select the controller, and choose **Upgrade**. Review
+the version and values before confirming.
 
 ## Safe uninstall
 

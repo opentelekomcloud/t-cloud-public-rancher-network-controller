@@ -96,11 +96,68 @@ func (r *TCloudClusterNetworkReconciler) Reconcile(ctx context.Context, request 
 		return r.reconcileManaged(ctx, network, service)
 	case infrav1.ManagementPolicyObserve:
 		return r.reconcileObserve(ctx, network, service)
+	case infrav1.ManagementPolicyAdopt:
+		return r.reconcileAdopt(ctx, network, service)
 	case infrav1.ManagementPolicyAbandon:
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionReady, "AbandonOnlyDuringDeletion", fmt.Errorf("Abandon policy is only valid while deleting"))
 	default:
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionReady, "InvalidPolicy", fmt.Errorf("unsupported management policy %q", policy))
 	}
+}
+
+func (r *TCloudClusterNetworkReconciler) reconcileAdopt(ctx context.Context, network *infrav1.TCloudClusterNetwork, service cloudservice.Service) (ctrl.Result, error) {
+	resources := network.Status.Resources
+	if resources.VPC.ID == "" || resources.Subnet.ID == "" || resources.SecurityGroup.ID == "" {
+		discovered, err := r.discoverAdoptableResources(ctx, network)
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "NetworkAdoptionFailed", err)
+		}
+		vpc, err := service.GetVPC(ctx, discovered.VPC.ID)
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "VPCAdoptionFailed", err)
+		}
+		subnet, err := service.GetSubnet(ctx, discovered.Subnet.ID)
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SubnetAdoptionFailed", err)
+		}
+		securityGroup, err := service.GetSecurityGroup(ctx, discovered.SecurityGroup.ID)
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupAdoptionFailed", err)
+		}
+		discovered.VPC.Name = vpc.Name
+		discovered.Subnet.Name = subnet.Name
+		discovered.SecurityGroup.Name = securityGroup.Name
+		if err := r.patchStatus(ctx, network, func() {
+			network.Status.OwnershipToken = string(network.UID)
+			network.Status.Resources = discovered
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	if _, err := service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
+		ID: resources.SecurityGroup.ID, Name: resources.SecurityGroup.Name,
+		Rules: cloudservice.RKE2Rules(resources.SecurityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+	}); err != nil {
+		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupRulesFailed", err)
+	}
+
+	if err := r.patchStatus(ctx, network, func() {
+		network.Status.ObservedGeneration = network.Generation
+		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
+			Type: infrav1.ConditionNetwork, Status: metav1.ConditionTrue, Reason: "ResourcesAdopted", Message: "Existing machine-owned network resources are now controller-managed",
+			ObservedGeneration: network.Generation,
+		})
+		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
+			Type: infrav1.ConditionReady, Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "Adopted T-Cloud cluster network is ready",
+			ObservedGeneration: network.Generation,
+		})
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 }
 
 func (r *TCloudClusterNetworkReconciler) reconcileManaged(ctx context.Context, network *infrav1.TCloudClusterNetwork, service cloudservice.Service) (ctrl.Result, error) {

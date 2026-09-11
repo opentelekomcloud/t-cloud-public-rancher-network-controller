@@ -1,7 +1,11 @@
 package controller
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -28,10 +32,11 @@ func (f fakeFactory) New(context.Context, cloudservice.Credentials) (cloudservic
 }
 
 type fakeCloud struct {
-	resources  map[string]cloudservice.Resource
-	deleted    []string
-	ports      int
-	failSubnet int
+	resources             map[string]cloudservice.Resource
+	deleted               []string
+	securityGroupRequests []cloudservice.SecurityGroupRequest
+	ports                 int
+	failSubnet            int
 }
 
 func newFakeCloud() *fakeCloud { return &fakeCloud{resources: map[string]cloudservice.Resource{}} }
@@ -47,6 +52,7 @@ func (f *fakeCloud) EnsureSubnet(_ context.Context, request cloudservice.SubnetR
 	return f.ensure("subnet", request.ID, request.Name), nil
 }
 func (f *fakeCloud) EnsureSecurityGroup(_ context.Context, request cloudservice.SecurityGroupRequest) (cloudservice.Resource, error) {
+	f.securityGroupRequests = append(f.securityGroupRequests, request)
 	return f.ensure("sg", request.ID, request.Name), nil
 }
 func (f *fakeCloud) ensure(kind, id, name string) cloudservice.Resource {
@@ -278,6 +284,87 @@ func TestObservePolicyNeverDeletesResources(t *testing.T) {
 	}
 }
 
+func TestAdoptMachineManagedNetwork(t *testing.T) {
+	ctx := context.Background()
+	reconciler, kubeClient, cloud := testReconciler(t, infrav1.ManagementPolicyAdopt)
+	cloud.resources["adopted-vpc"] = cloudservice.Resource{ID: "adopted-vpc", Name: "vpc-docker-machine"}
+	cloud.resources["adopted-subnet"] = cloudservice.Resource{ID: "adopted-subnet", Name: "subnet-docker-machine"}
+	cloud.resources["adopted-sg"] = cloudservice.Resource{ID: "adopted-sg", Name: "docker-machine"}
+
+	machine := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": tcloudMachineGVK.GroupVersion().String(),
+		"kind":       tcloudMachineGVK.Kind,
+		"metadata": map[string]interface{}{
+			"name":              "test-de-worker",
+			"namespace":         "fleet-default",
+			"creationTimestamp": "2026-01-01T00:00:00Z",
+			"labels":            map[string]interface{}{clusterNameLabel: "test-de"},
+		},
+		"status": map[string]interface{}{"ready": true},
+	}}
+	if err := kubeClient.Create(ctx, machine); err != nil {
+		t.Fatal(err)
+	}
+	stateSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-de-worker-machine-state", Namespace: "fleet-default"},
+		Data:       map[string][]byte{"extractedConfig": machineStateArchive(t, "adopted-vpc", "adopted-subnet", "adopted-sg", true)},
+	}
+	if err := kubeClient.Create(ctx, stateSecret); err != nil {
+		t.Fatal(err)
+	}
+
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: "test-de-network", Namespace: "fleet-default"}}
+	for i := 0; i < 6; i++ {
+		if _, err := reconciler.Reconcile(ctx, request); err != nil {
+			t.Fatalf("reconcile adopt: %v", err)
+		}
+	}
+	value := &infrav1.TCloudClusterNetwork{}
+	if err := kubeClient.Get(ctx, request.NamespacedName, value); err != nil {
+		t.Fatal(err)
+	}
+	if !conditionTrue(value, infrav1.ConditionReady) {
+		t.Fatalf("adopted network not ready: %#v", value.Status.Conditions)
+	}
+	if value.Status.Resources.VPC.ID != "adopted-vpc" || value.Status.Resources.Subnet.ID != "adopted-subnet" || value.Status.Resources.SecurityGroup.ID != "adopted-sg" {
+		t.Fatalf("unexpected adopted resources: %#v", value.Status.Resources)
+	}
+	if !value.Status.Resources.VPC.ControllerManaged || !value.Status.Resources.Subnet.ControllerManaged || !value.Status.Resources.SecurityGroup.ControllerManaged {
+		t.Fatalf("adopted resources are not controller-managed: %#v", value.Status.Resources)
+	}
+	if len(cloud.securityGroupRequests) == 0 || len(cloud.securityGroupRequests[len(cloud.securityGroupRequests)-1].Rules) == 0 {
+		t.Fatal("adoption did not reconcile security-group rules")
+	}
+	if err := kubeClient.Delete(ctx, machine); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Delete(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		_, err := reconciler.Reconcile(ctx, request)
+		if err != nil && !apierrors.IsNotFound(err) {
+			t.Fatalf("reconcile adopted cleanup: %v", err)
+		}
+	}
+	if len(cloud.deleted) != 3 || cloud.deleted[0] != "adopted-sg" || cloud.deleted[1] != "adopted-subnet" || cloud.deleted[2] != "adopted-vpc" {
+		t.Fatalf("unexpected adopted resource deletion order: %#v", cloud.deleted)
+	}
+}
+
+func TestDecodeMachineStatePreservesUserManagedOwnership(t *testing.T) {
+	state, err := decodeMachineDriverState(machineStateArchive(t, "existing-vpc", "existing-subnet", "", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Driver.VPCID.Managed || state.Driver.SubnetID.Managed || state.Driver.ManagedSecurityGroup != "" {
+		t.Fatalf("unexpected decoded ownership: %#v", state.Driver)
+	}
+	if _, err := adoptableResourcesFromState("test-worker", state); err == nil {
+		t.Fatal("expected adoption to reject a user-managed network")
+	}
+}
+
 func TestOrphanExpiryDeletesRequest(t *testing.T) {
 	ctx := context.Background()
 	reconciler, kubeClient, _ := testReconciler(t, infrav1.ManagementPolicyManaged)
@@ -330,7 +417,7 @@ func testReconciler(t *testing.T, policy infrav1.ManagementPolicy) (*TCloudClust
 			Network: infrav1.NetworkSpec{
 				VPC:           infrav1.VPCSpec{ID: observeID(policy, "existing-vpc"), Name: "test-de", CIDR: "192.168.0.0/16"},
 				Subnet:        infrav1.SubnetSpec{ID: observeID(policy, "existing-subnet"), Name: "test-de", CIDR: "192.168.0.0/24", GatewayIP: "192.168.0.1"},
-				SecurityGroup: infrav1.SecurityGroupSpec{ID: observeID(policy, "existing-sg"), Name: "test-de-rke2", CNI: "canal"},
+				SecurityGroup: infrav1.SecurityGroupSpec{ID: observeID(policy, "existing-sg"), Name: "test-de-rke2", CNI: "canal", SSHAllowedCIDRs: []string{"203.0.113.10/32"}},
 			},
 		},
 	}
@@ -354,6 +441,38 @@ func testReconciler(t *testing.T, policy infrav1.ManagementPolicy) (*TCloudClust
 		Client: kubeClient, APIReader: kubeClient, Scheme: scheme, Factory: fakeFactory{service: cloud}, Recorder: record.NewFakeRecorder(20),
 	}
 	return reconciler, kubeClient, cloud
+}
+
+func machineStateArchive(t *testing.T, vpcID, subnetID, securityGroupID string, managed bool) []byte {
+	t.Helper()
+	config := map[string]interface{}{
+		"DriverName": "opentelekomcloud",
+		"Driver": map[string]interface{}{
+			"vpc_id":                 map[string]interface{}{"value": vpcID, "managed": managed},
+			"subnet_id":              map[string]interface{}{"value": subnetID, "managed": managed},
+			"managed_security_group": securityGroupID,
+		},
+	}
+	value, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := &bytes.Buffer{}
+	gzipWriter := gzip.NewWriter(buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "/home/machine/.docker/machine/machines/test/config.json", Mode: 0600, Size: int64(len(value))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(value); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }
 
 func observeID(policy infrav1.ManagementPolicy, id string) string {
