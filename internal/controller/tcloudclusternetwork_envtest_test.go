@@ -80,6 +80,25 @@ func TestEnvtestManagedAndAdoptLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	invalidCIDRs := &infrav1.TCloudClusterNetwork{
+		ObjectMeta: metav1.ObjectMeta{Name: "duplicate-cidrs", Namespace: "fleet-default"},
+		Spec: infrav1.TCloudClusterNetworkSpec{
+			ClusterRef:          infrav1.NamespacedReference{Name: "duplicate-cidrs", Namespace: "fleet-default"},
+			CredentialSecretRef: infrav1.NamespacedReference{Name: "cc-test", Namespace: "cattle-global-data"},
+			ManagementPolicy:    infrav1.ManagementPolicyManaged,
+			Region:              "eu-de",
+			Network: infrav1.NetworkSpec{
+				VPC:    infrav1.VPCSpec{CIDR: "192.168.0.0/16"},
+				Subnet: infrav1.SubnetSpec{CIDR: "192.168.0.0/24", GatewayIP: "192.168.0.1"},
+				SecurityGroup: infrav1.SecurityGroupSpec{
+					CNI: "canal", SSHAllowedCIDRs: []string{"203.0.113.5/32", "203.0.113.5/32"},
+				},
+			},
+		},
+	}
+	if err := apiClient.Create(ctx, invalidCIDRs); !apierrors.IsInvalid(err) {
+		t.Fatalf("duplicate SSH CIDRs should be rejected, got %v", err)
+	}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "cc-test", Namespace: "cattle-global-data"}, Data: map[string][]byte{
 		"opentelekomcloudcredentialConfig-authUrl":    []byte("https://iam.example/v3"),
 		"opentelekomcloudcredentialConfig-username":   []byte("user"),

@@ -51,6 +51,7 @@ type SecurityGroupRequest struct {
 	Name        string
 	Description string
 	Rules       []Rule
+	RemoveRules []Rule
 }
 
 type Service interface {

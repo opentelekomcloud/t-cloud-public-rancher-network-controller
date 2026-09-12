@@ -182,19 +182,33 @@ func (s *tcloudService) EnsureSecurityGroup(_ context.Context, request SecurityG
 			return Resource{}, err
 		}
 	}
+	for _, obsolete := range request.RemoveRules {
+		for _, existing := range group.Rules {
+			if !matchesRule(group, existing, obsolete) {
+				continue
+			}
+			if err := secgroups.DeleteRule(s.compute, existing.ID).Err; err != nil && !IsNotFound(err) {
+				return Resource{}, err
+			}
+		}
+	}
 
 	return Resource{ID: group.ID, Name: group.Name}, nil
 }
 
 func hasRule(group *secgroups.SecurityGroup, wanted Rule) bool {
 	for _, existing := range group.Rules {
-		remoteGroupMatches := wanted.RemoteGroupID == "" || existing.Group.Name == group.Name
-		if strings.EqualFold(existing.IPProtocol, wanted.Protocol) && existing.FromPort == wanted.FromPort &&
-			existing.ToPort == wanted.ToPort && existing.IPRange.CIDR == wanted.CIDR && remoteGroupMatches {
+		if matchesRule(group, existing, wanted) {
 			return true
 		}
 	}
 	return false
+}
+
+func matchesRule(group *secgroups.SecurityGroup, existing secgroups.Rule, wanted Rule) bool {
+	remoteGroupMatches := wanted.RemoteGroupID == "" || existing.Group.Name == group.Name
+	return strings.EqualFold(existing.IPProtocol, wanted.Protocol) && existing.FromPort == wanted.FromPort &&
+		existing.ToPort == wanted.ToPort && existing.IPRange.CIDR == wanted.CIDR && remoteGroupMatches
 }
 
 func (s *tcloudService) GetVPC(_ context.Context, id string) (Resource, error) {

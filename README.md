@@ -40,6 +40,12 @@ referenced T-Cloud pool configs are converged to that network as well. Explicit
 Existing network IDs are never automatically claimed; use the `Observe` policy
 for those resources.
 
+For Managed and Adopt networks, `spec.network.securityGroup.sshAllowedCIDRs` is
+editable after cluster creation. CIDRs must be valid and unique. Reconciliation
+adds new SSH rules first, then removes only rules found in the controller's last
+successfully applied CIDR set. User-created rules are left intact, and Observe
+networks are never pruned.
+
 ## Development
 
 ```bash

@@ -39,6 +39,52 @@ type fakeCloud struct {
 	failSubnet            int
 }
 
+func TestManagedSSHAllowedCIDRsAreReconciled(t *testing.T) {
+	ctx := context.Background()
+	reconciler, kubeClient, cloud := testReconciler(t, infrav1.ManagementPolicyManaged)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: "test-de-network", Namespace: "fleet-default"}}
+	reconcileUntilReady(t, ctx, reconciler, kubeClient, request)
+
+	network := &infrav1.TCloudClusterNetwork{}
+	if err := kubeClient.Get(ctx, request.NamespacedName, network); err != nil {
+		t.Fatal(err)
+	}
+	if len(network.Status.AppliedSSHAllowedCIDRs) != 1 || network.Status.AppliedSSHAllowedCIDRs[0] != "203.0.113.10/32" {
+		t.Fatalf("initial applied CIDRs were not recorded: %#v", network.Status.AppliedSSHAllowedCIDRs)
+	}
+	network.Spec.Network.SecurityGroup.SSHAllowedCIDRs = []string{"198.51.100.0/24"}
+	if err := kubeClient.Update(ctx, network); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+
+	last := cloud.securityGroupRequests[len(cloud.securityGroupRequests)-1]
+	wantedRemoval := cloudservice.Rule{Protocol: "tcp", FromPort: 22, ToPort: 22, CIDR: "203.0.113.10/32"}
+	if len(last.RemoveRules) != 1 || last.RemoveRules[0] != wantedRemoval {
+		t.Fatalf("unexpected obsolete SSH rules: %#v", last.RemoveRules)
+	}
+	if !containsCloudRule(last.Rules, cloudservice.Rule{Protocol: "tcp", FromPort: 22, ToPort: 22, CIDR: "198.51.100.0/24"}) {
+		t.Fatalf("new SSH rule was not requested: %#v", last.Rules)
+	}
+	if err := kubeClient.Get(ctx, request.NamespacedName, network); err != nil {
+		t.Fatal(err)
+	}
+	if len(network.Status.AppliedSSHAllowedCIDRs) != 1 || network.Status.AppliedSSHAllowedCIDRs[0] != "198.51.100.0/24" {
+		t.Fatalf("updated applied CIDRs were not recorded: %#v", network.Status.AppliedSSHAllowedCIDRs)
+	}
+}
+
+func containsCloudRule(rules []cloudservice.Rule, wanted cloudservice.Rule) bool {
+	for _, rule := range rules {
+		if rule == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func newFakeCloud() *fakeCloud { return &fakeCloud{resources: map[string]cloudservice.Resource{}} }
 
 func (f *fakeCloud) EnsureVPC(_ context.Context, request cloudservice.VPCRequest) (cloudservice.Resource, error) {

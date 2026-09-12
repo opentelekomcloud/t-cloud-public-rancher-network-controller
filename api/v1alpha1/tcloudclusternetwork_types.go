@@ -5,18 +5,19 @@ import (
 )
 
 const (
-	NetworkFinalizer        = "infrastructure.otc.t-systems.com/network-cleanup"
-	ClusterAnnotation       = "infrastructure.otc.t-systems.com/cluster-network"
-	NetworkPolicyAnnotation = "infrastructure.otc.t-systems.com/network-policy"
-	UIProviderAnnotation    = "ui.rancher/provider"
-	TCloudProviderID        = "opentelekomcloud"
-	ConditionReady          = "Ready"
-	ConditionCredentials    = "CredentialsReady"
-	ConditionNetwork        = "NetworkReady"
-	ConditionDeleting       = "Deleting"
-	ConditionOwnerBound     = "OwnerBound"
-	ConditionOwnership      = "OwnershipVerified"
-	DefaultOrphanTimeout    = "1h"
+	NetworkFinalizer          = "infrastructure.otc.t-systems.com/network-cleanup"
+	ClusterAnnotation         = "infrastructure.otc.t-systems.com/cluster-network"
+	NetworkPolicyAnnotation   = "infrastructure.otc.t-systems.com/network-policy"
+	UIProviderAnnotation      = "ui.rancher/provider"
+	TCloudProviderID          = "opentelekomcloud"
+	SSHAllowedCIDRsAnnotation = "infrastructure.otc.t-systems.com/ssh-allowed-cidrs"
+	ConditionReady            = "Ready"
+	ConditionCredentials      = "CredentialsReady"
+	ConditionNetwork          = "NetworkReady"
+	ConditionDeleting         = "Deleting"
+	ConditionOwnerBound       = "OwnerBound"
+	ConditionOwnership        = "OwnershipVerified"
+	DefaultOrphanTimeout      = "1h"
 )
 
 type ManagementPolicy string
@@ -59,6 +60,8 @@ type SecurityGroupSpec struct {
 	Name string `json:"name,omitempty"`
 	// +kubebuilder:validation:items:Format=cidr
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=set
 	SSHAllowedCIDRs []string `json:"sshAllowedCIDRs,omitempty"`
 	// +kubebuilder:validation:Enum=canal;flannel;calico
 	CNI string `json:"cni,omitempty"`
@@ -106,11 +109,12 @@ type NetworkResourceStatus struct {
 }
 
 type TCloudClusterNetworkStatus struct {
-	ObservedGeneration int64                 `json:"observedGeneration,omitempty"`
-	ClusterUID         string                `json:"clusterUID,omitempty"`
-	OwnershipToken     string                `json:"ownershipToken,omitempty"`
-	Resources          NetworkResourceStatus `json:"resources,omitempty"`
-	Conditions         []metav1.Condition    `json:"conditions,omitempty"`
+	ObservedGeneration     int64                 `json:"observedGeneration,omitempty"`
+	ClusterUID             string                `json:"clusterUID,omitempty"`
+	OwnershipToken         string                `json:"ownershipToken,omitempty"`
+	Resources              NetworkResourceStatus `json:"resources,omitempty"`
+	AppliedSSHAllowedCIDRs []string              `json:"appliedSSHAllowedCIDRs,omitempty"`
+	Conditions             []metav1.Condition    `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

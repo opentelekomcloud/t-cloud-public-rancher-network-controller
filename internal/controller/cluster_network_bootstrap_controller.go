@@ -78,7 +78,7 @@ func (r *TCloudClusterNetworkBootstrapReconciler) Reconcile(ctx context.Context,
 			if !apierrors.IsAlreadyExists(err) {
 				return ctrl.Result{}, err
 			}
-		} else if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, infrav1.ManagementPolicyAdopt); err != nil {
+		} else if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, infrav1.ManagementPolicyAdopt, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: bootstrapRetryInterval}, nil
@@ -99,7 +99,7 @@ func (r *TCloudClusterNetworkBootstrapReconciler) Reconcile(ctx context.Context,
 			return ctrl.Result{}, err
 		}
 	}
-	if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, network.Spec.ManagementPolicy); err != nil {
+	if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, network.Spec.ManagementPolicy, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
@@ -311,7 +311,7 @@ func (r *TCloudClusterNetworkBootstrapReconciler) ensureProviderAnnotation(ctx c
 	return r.Patch(ctx, cluster, client.MergeFrom(base))
 }
 
-func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations(ctx context.Context, cluster *unstructured.Unstructured, name string, policy infrav1.ManagementPolicy) error {
+func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations(ctx context.Context, cluster *unstructured.Unstructured, name string, policy infrav1.ManagementPolicy, sshAllowedCIDRs []string) error {
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(provisioningClusterGVK)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(cluster), current); err != nil {
@@ -321,13 +321,15 @@ func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	if annotations[infrav1.ClusterAnnotation] == name && annotations[infrav1.NetworkPolicyAnnotation] == string(policy) && annotations[infrav1.UIProviderAnnotation] == infrav1.TCloudProviderID {
+	sshAllowedCIDRsValue := strings.Join(sshAllowedCIDRs, ",")
+	if annotations[infrav1.ClusterAnnotation] == name && annotations[infrav1.NetworkPolicyAnnotation] == string(policy) && annotations[infrav1.UIProviderAnnotation] == infrav1.TCloudProviderID && annotations[infrav1.SSHAllowedCIDRsAnnotation] == sshAllowedCIDRsValue {
 		return nil
 	}
 	base := current.DeepCopy()
 	annotations[infrav1.ClusterAnnotation] = name
 	annotations[infrav1.NetworkPolicyAnnotation] = string(policy)
 	annotations[infrav1.UIProviderAnnotation] = infrav1.TCloudProviderID
+	annotations[infrav1.SSHAllowedCIDRsAnnotation] = sshAllowedCIDRsValue
 	current.SetAnnotations(annotations)
 	return r.Patch(ctx, current, client.MergeFrom(base))
 }

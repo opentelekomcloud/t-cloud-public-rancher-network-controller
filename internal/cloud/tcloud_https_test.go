@@ -97,3 +97,45 @@ func TestTCloudServiceVPCOverHTTPS(t *testing.T) {
 		t.Fatalf("repeated delete should accept 404: %v", err)
 	}
 }
+
+func TestTCloudServiceAddsBeforeRemovingSecurityGroupRulesOverHTTPS(t *testing.T) {
+	var mu sync.Mutex
+	operations := make([]string, 0, 2)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/os-security-groups/sg-id":
+			_, _ = w.Write([]byte(`{"security_group":{"id":"sg-id","name":"managed-sg","rules":[{"id":"old-rule","from_port":22,"to_port":22,"ip_protocol":"tcp","ip_range":{"cidr":"203.0.113.5/32"}}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/os-security-group-rules":
+			mu.Lock()
+			operations = append(operations, "add")
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"security_group_rule":{"id":"new-rule","from_port":22,"to_port":22,"ip_protocol":"tcp","ip_range":{"cidr":"198.51.100.0/24"}}}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/os-security-group-rules/old-rule":
+			mu.Lock()
+			operations = append(operations, "remove")
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := &golangsdk.ProviderClient{TokenID: "test-token", HTTPClient: *server.Client()}
+	client := &golangsdk.ServiceClient{ProviderClient: provider, Endpoint: server.URL + "/"}
+	service := &tcloudService{compute: client}
+	_, err := service.EnsureSecurityGroup(context.Background(), SecurityGroupRequest{
+		ID:          "sg-id",
+		Rules:       []Rule{{Protocol: "tcp", FromPort: 22, ToPort: 22, CIDR: "198.51.100.0/24"}},
+		RemoveRules: []Rule{{Protocol: "tcp", FromPort: 22, ToPort: 22, CIDR: "203.0.113.5/32"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(operations) != 2 || operations[0] != "add" || operations[1] != "remove" {
+		t.Fatalf("unexpected rule operation order: %#v", operations)
+	}
+}

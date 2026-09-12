@@ -140,13 +140,15 @@ func (r *TCloudClusterNetworkReconciler) reconcileAdopt(ctx context.Context, net
 
 	if _, err := service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
 		ID: resources.SecurityGroup.ID, Name: resources.SecurityGroup.Name,
-		Rules: cloudservice.RKE2Rules(resources.SecurityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		Rules:       cloudservice.RKE2Rules(resources.SecurityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		RemoveRules: cloudservice.ObsoleteSSHRules(network.Status.AppliedSSHAllowedCIDRs, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs),
 	}); err != nil {
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupRulesFailed", err)
 	}
 
 	if err := r.patchStatus(ctx, network, func() {
 		network.Status.ObservedGeneration = network.Generation
+		network.Status.AppliedSSHAllowedCIDRs = append([]string(nil), network.Spec.Network.SecurityGroup.SSHAllowedCIDRs...)
 		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
 			Type: infrav1.ConditionNetwork, Status: metav1.ConditionTrue, Reason: "ResourcesAdopted", Message: "Existing machine-owned network resources are now controller-managed",
 			ObservedGeneration: network.Generation,
@@ -219,7 +221,8 @@ func (r *TCloudClusterNetworkReconciler) reconcileManaged(ctx context.Context, n
 	}
 	_, err = service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
 		ID: securityGroup.ID, Name: securityGroupName,
-		Rules: cloudservice.RKE2Rules(securityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		Rules:       cloudservice.RKE2Rules(securityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		RemoveRules: cloudservice.ObsoleteSSHRules(network.Status.AppliedSSHAllowedCIDRs, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs),
 	})
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupRulesFailed", err)
@@ -227,6 +230,7 @@ func (r *TCloudClusterNetworkReconciler) reconcileManaged(ctx context.Context, n
 
 	if err := r.patchStatus(ctx, network, func() {
 		network.Status.ObservedGeneration = network.Generation
+		network.Status.AppliedSSHAllowedCIDRs = append([]string(nil), network.Spec.Network.SecurityGroup.SSHAllowedCIDRs...)
 		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
 			Type: infrav1.ConditionNetwork, Status: metav1.ConditionTrue, Reason: "ResourcesReady", Message: "Managed network resources are ready",
 			ObservedGeneration: network.Generation,

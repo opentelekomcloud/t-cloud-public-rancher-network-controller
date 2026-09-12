@@ -1,5 +1,7 @@
 package cloud
 
+import "sort"
+
 func RKE2Rules(securityGroupID string, sshAllowedCIDRs []string, cni string) []Rule {
 	rules := make([]Rule, 0, len(sshAllowedCIDRs)+12)
 	for _, cidr := range sshAllowedCIDRs {
@@ -32,6 +34,25 @@ func RKE2Rules(securityGroupID string, sshAllowedCIDRs []string, cni string) []R
 		)
 	}
 
+	return rules
+}
+
+func ObsoleteSSHRules(previous, desired []string) []Rule {
+	wanted := make(map[string]bool, len(desired))
+	for _, cidr := range desired {
+		wanted[cidr] = true
+	}
+	obsoleteCIDRs := make([]string, 0)
+	for _, cidr := range previous {
+		if !wanted[cidr] {
+			obsoleteCIDRs = append(obsoleteCIDRs, cidr)
+		}
+	}
+	sort.Strings(obsoleteCIDRs)
+	rules := make([]Rule, 0, len(obsoleteCIDRs))
+	for _, cidr := range obsoleteCIDRs {
+		rules = append(rules, Rule{Protocol: "tcp", FromPort: 22, ToPort: 22, CIDR: cidr})
+	}
 	return rules
 }
 
