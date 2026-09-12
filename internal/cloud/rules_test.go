@@ -52,6 +52,17 @@ func TestRKE2RulesDoNotAssumeVXLANForCilium(t *testing.T) {
 	}
 }
 
+func TestObsoleteSSHRulesOnlyReturnsRemovedCIDRs(t *testing.T) {
+	rules := ObsoleteSSHRules(
+		[]string{"203.0.113.5/32", "198.51.100.0/24"},
+		[]string{"192.0.2.10/32", "198.51.100.0/24"},
+	)
+	want := []Rule{{Protocol: "tcp", FromPort: 22, ToPort: 22, CIDR: "203.0.113.5/32"}}
+	if len(rules) != len(want) || rules[0] != want[0] {
+		t.Fatalf("unexpected obsolete SSH rules: %#v", rules)
+	}
+}
+
 func containsRule(rules []Rule, expected Rule) bool {
 	for _, rule := range rules {
 		if rule == expected {

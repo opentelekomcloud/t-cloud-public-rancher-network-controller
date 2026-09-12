@@ -201,6 +201,11 @@ func (in *TCloudClusterNetworkSpec) DeepCopy() *TCloudClusterNetworkSpec {
 func (in *TCloudClusterNetworkStatus) DeepCopyInto(out *TCloudClusterNetworkStatus) {
 	*out = *in
 	out.Resources = in.Resources
+	if in.AppliedSSHAllowedCIDRs != nil {
+		in, out := &in.AppliedSSHAllowedCIDRs, &out.AppliedSSHAllowedCIDRs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

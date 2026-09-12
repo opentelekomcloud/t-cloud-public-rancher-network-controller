@@ -16,7 +16,10 @@ rules:
     verbs: [update]
   - apiGroups: [provisioning.cattle.io]
     resources: [clusters]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [rke-machine-config.cattle.io]
+    resources: [opentelekomcloudconfigs]
+    verbs: [get, list, watch, update, patch]
   - apiGroups: [rke-machine.cattle.io]
     resources: [opentelekomcloudmachines]
     verbs: [get, list, watch]
@@ -29,4 +32,3 @@ rules:
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [get, list, watch, create, update, patch, delete]
-

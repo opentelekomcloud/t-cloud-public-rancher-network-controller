@@ -62,6 +62,18 @@ rules:
   verbs:
   - get
   - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rke-machine-config.cattle.io
+  resources:
+  - opentelekomcloudconfigs
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - rke-machine.cattle.io

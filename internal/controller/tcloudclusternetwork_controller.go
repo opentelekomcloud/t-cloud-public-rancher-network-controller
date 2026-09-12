@@ -31,6 +31,7 @@ import (
 var (
 	provisioningClusterGVK = schema.GroupVersionKind{Group: "provisioning.cattle.io", Version: "v1", Kind: "Cluster"}
 	tcloudMachineGVK       = schema.GroupVersionKind{Group: "rke-machine.cattle.io", Version: "v1", Kind: "OpentelekomcloudMachine"}
+	tcloudMachineConfigGVK = schema.GroupVersionKind{Group: "rke-machine-config.cattle.io", Version: "v1", Kind: "OpentelekomcloudConfig"}
 )
 
 const clusterNameLabel = "cluster.x-k8s.io/cluster-name"
@@ -38,8 +39,9 @@ const clusterNameLabel = "cluster.x-k8s.io/cluster-name"
 // +kubebuilder:rbac:groups=infrastructure.otc.t-systems.com,resources=tcloudclusternetworks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.otc.t-systems.com,resources=tcloudclusternetworks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.otc.t-systems.com,resources=tcloudclusternetworks/finalizers,verbs=update
-// +kubebuilder:rbac:groups=provisioning.cattle.io,resources=clusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=provisioning.cattle.io,resources=clusters,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=rke-machine.cattle.io,resources=opentelekomcloudmachines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rke-machine-config.cattle.io,resources=opentelekomcloudconfigs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -138,13 +140,15 @@ func (r *TCloudClusterNetworkReconciler) reconcileAdopt(ctx context.Context, net
 
 	if _, err := service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
 		ID: resources.SecurityGroup.ID, Name: resources.SecurityGroup.Name,
-		Rules: cloudservice.RKE2Rules(resources.SecurityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		Rules:       cloudservice.RKE2Rules(resources.SecurityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		RemoveRules: cloudservice.ObsoleteSSHRules(network.Status.AppliedSSHAllowedCIDRs, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs),
 	}); err != nil {
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupRulesFailed", err)
 	}
 
 	if err := r.patchStatus(ctx, network, func() {
 		network.Status.ObservedGeneration = network.Generation
+		network.Status.AppliedSSHAllowedCIDRs = append([]string(nil), network.Spec.Network.SecurityGroup.SSHAllowedCIDRs...)
 		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
 			Type: infrav1.ConditionNetwork, Status: metav1.ConditionTrue, Reason: "ResourcesAdopted", Message: "Existing machine-owned network resources are now controller-managed",
 			ObservedGeneration: network.Generation,
@@ -217,7 +221,8 @@ func (r *TCloudClusterNetworkReconciler) reconcileManaged(ctx context.Context, n
 	}
 	_, err = service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
 		ID: securityGroup.ID, Name: securityGroupName,
-		Rules: cloudservice.RKE2Rules(securityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		Rules:       cloudservice.RKE2Rules(securityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+		RemoveRules: cloudservice.ObsoleteSSHRules(network.Status.AppliedSSHAllowedCIDRs, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs),
 	})
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupRulesFailed", err)
@@ -225,6 +230,7 @@ func (r *TCloudClusterNetworkReconciler) reconcileManaged(ctx context.Context, n
 
 	if err := r.patchStatus(ctx, network, func() {
 		network.Status.ObservedGeneration = network.Generation
+		network.Status.AppliedSSHAllowedCIDRs = append([]string(nil), network.Spec.Network.SecurityGroup.SSHAllowedCIDRs...)
 		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
 			Type: infrav1.ConditionNetwork, Status: metav1.ConditionTrue, Reason: "ResourcesReady", Message: "Managed network resources are ready",
 			ObservedGeneration: network.Generation,

@@ -112,8 +112,10 @@ spec:
                         items:
                           format: cidr
                           type: string
+                        maxItems: 64
                         minItems: 1
                         type: array
+                        x-kubernetes-list-type: set
                     type: object
                   subnet:
                     properties:
@@ -184,6 +186,10 @@ spec:
               rule: self.projectName == oldSelf.projectName
           status:
             properties:
+              appliedSSHAllowedCIDRs:
+                items:
+                  type: string
+                type: array
               clusterUID:
                 type: string
               conditions:

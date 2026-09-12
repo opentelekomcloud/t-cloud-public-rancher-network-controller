@@ -11,7 +11,7 @@ only resources represented by a controller-owned `TCloudClusterNetwork`.
 
 - `Managed` creates shared resources and deletes them when the network object is
   deleted.
-- `Adopt` reads the oldest ready machine's Rancher machine-state Secret, verifies
+- `Adopt` reads the oldest machine with complete Rancher machine state, verifies
   that its VPC, subnet, and security group were created by the machine driver,
   adds the requested CNI rules, and takes responsibility for deleting them.
 - `Observe` validates existing resources and never deletes them.
@@ -21,6 +21,30 @@ only resources represented by a controller-owned `TCloudClusterNetwork`.
 Managed resources receive a name suffix derived from the Kubernetes object's
 UID. Cleanup verifies the stored ID, expected name, and `controllerManaged`
 status before issuing a delete operation.
+
+## Scaling behavior
+
+New clusters should select Managed or Existing shared networking even when they
+start with one node. For a legacy single-node T-Cloud cluster that still has a
+driver-managed network, the bootstrap reconciler creates an internal `Adopt`
+request as soon as the first machine state is complete. After adoption is ready,
+it patches every referenced `OpentelekomcloudConfig` to `networkScope: shared`
+with the adopted VPC, subnet, and security-group values. It also maintains the
+cluster network, ownership, and `ui.rancher/provider: opentelekomcloud`
+annotations.
+
+Because this convergence happens before a later scale operation, changing pool
+quantity through Rancher's `+1` control, editing the cluster form, or updating
+the provisioning Cluster manifest all use the same shared network. Newly
+referenced T-Cloud pool configs are converged to that network as well. Explicit
+Existing network IDs are never automatically claimed; use the `Observe` policy
+for those resources.
+
+For Managed and Adopt networks, `spec.network.securityGroup.sshAllowedCIDRs` is
+editable after cluster creation. CIDRs must be valid and unique. Reconciliation
+adds new SSH rules first, then removes only rules found in the controller's last
+successfully applied CIDR set. User-created rules are left intact, and Observe
+networks are never pruned.
 
 ## Development
 
