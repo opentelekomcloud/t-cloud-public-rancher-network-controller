@@ -31,6 +31,7 @@ import (
 var (
 	provisioningClusterGVK = schema.GroupVersionKind{Group: "provisioning.cattle.io", Version: "v1", Kind: "Cluster"}
 	tcloudMachineGVK       = schema.GroupVersionKind{Group: "rke-machine.cattle.io", Version: "v1", Kind: "OpentelekomcloudMachine"}
+	tcloudMachineConfigGVK = schema.GroupVersionKind{Group: "rke-machine-config.cattle.io", Version: "v1", Kind: "OpentelekomcloudConfig"}
 )
 
 const clusterNameLabel = "cluster.x-k8s.io/cluster-name"
@@ -38,8 +39,9 @@ const clusterNameLabel = "cluster.x-k8s.io/cluster-name"
 // +kubebuilder:rbac:groups=infrastructure.otc.t-systems.com,resources=tcloudclusternetworks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.otc.t-systems.com,resources=tcloudclusternetworks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.otc.t-systems.com,resources=tcloudclusternetworks/finalizers,verbs=update
-// +kubebuilder:rbac:groups=provisioning.cattle.io,resources=clusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=provisioning.cattle.io,resources=clusters,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=rke-machine.cattle.io,resources=opentelekomcloudmachines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rke-machine-config.cattle.io,resources=opentelekomcloudconfigs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 

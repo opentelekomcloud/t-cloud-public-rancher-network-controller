@@ -5,15 +5,18 @@ import (
 )
 
 const (
-	NetworkFinalizer     = "infrastructure.otc.t-systems.com/network-cleanup"
-	ClusterAnnotation    = "infrastructure.otc.t-systems.com/cluster-network"
-	ConditionReady       = "Ready"
-	ConditionCredentials = "CredentialsReady"
-	ConditionNetwork     = "NetworkReady"
-	ConditionDeleting    = "Deleting"
-	ConditionOwnerBound  = "OwnerBound"
-	ConditionOwnership   = "OwnershipVerified"
-	DefaultOrphanTimeout = "1h"
+	NetworkFinalizer        = "infrastructure.otc.t-systems.com/network-cleanup"
+	ClusterAnnotation       = "infrastructure.otc.t-systems.com/cluster-network"
+	NetworkPolicyAnnotation = "infrastructure.otc.t-systems.com/network-policy"
+	UIProviderAnnotation    = "ui.rancher/provider"
+	TCloudProviderID        = "opentelekomcloud"
+	ConditionReady          = "Ready"
+	ConditionCredentials    = "CredentialsReady"
+	ConditionNetwork        = "NetworkReady"
+	ConditionDeleting       = "Deleting"
+	ConditionOwnerBound     = "OwnerBound"
+	ConditionOwnership      = "OwnershipVerified"
+	DefaultOrphanTimeout    = "1h"
 )
 
 type ManagementPolicy string

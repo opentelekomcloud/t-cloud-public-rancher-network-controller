@@ -12,6 +12,7 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,43 +43,45 @@ func (r *TCloudClusterNetworkReconciler) discoverAdoptableResources(ctx context.
 		return infrav1.NetworkResourceStatus{}, fmt.Errorf("list T-Cloud machines: %w", err)
 	}
 
-	ready := make([]unstructured.Unstructured, 0, len(machines.Items))
+	candidates := make([]unstructured.Unstructured, 0, len(machines.Items))
 	for i := range machines.Items {
-		isReady, _, err := unstructured.NestedBool(machines.Items[i].Object, "status", "ready")
-		if err != nil {
-			return infrav1.NetworkResourceStatus{}, fmt.Errorf("read machine %s readiness: %w", machines.Items[i].GetName(), err)
-		}
-		if isReady {
-			ready = append(ready, machines.Items[i])
+		if machines.Items[i].GetDeletionTimestamp() == nil {
+			candidates = append(candidates, machines.Items[i])
 		}
 	}
-	if len(ready) == 0 {
-		return infrav1.NetworkResourceStatus{}, fmt.Errorf("no ready T-Cloud machine is available for network adoption")
+	if len(candidates) == 0 {
+		return infrav1.NetworkResourceStatus{}, fmt.Errorf("no T-Cloud machine is available for network adoption")
 	}
 
-	sort.Slice(ready, func(i, j int) bool {
-		left, right := ready[i].GetCreationTimestamp(), ready[j].GetCreationTimestamp()
+	sort.Slice(candidates, func(i, j int) bool {
+		left, right := candidates[i].GetCreationTimestamp(), candidates[j].GetCreationTimestamp()
 		if left.Time.Equal(right.Time) {
-			return ready[i].GetName() < ready[j].GetName()
+			return candidates[i].GetName() < candidates[j].GetName()
 		}
 		return left.Before(&right)
 	})
 
-	stateSecret := &corev1.Secret{}
-	secretName := ready[0].GetName() + "-machine-state"
 	reader := r.APIReader
 	if reader == nil {
 		reader = r.Client
 	}
-	if err := reader.Get(ctx, types.NamespacedName{Namespace: network.Spec.ClusterRef.Namespace, Name: secretName}, stateSecret); err != nil {
-		return infrav1.NetworkResourceStatus{}, fmt.Errorf("read machine state Secret %s/%s: %w", network.Spec.ClusterRef.Namespace, secretName, err)
-	}
+	for i := range candidates {
+		stateSecret := &corev1.Secret{}
+		secretName := candidates[i].GetName() + "-machine-state"
+		if err := reader.Get(ctx, types.NamespacedName{Namespace: network.Spec.ClusterRef.Namespace, Name: secretName}, stateSecret); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return infrav1.NetworkResourceStatus{}, fmt.Errorf("read machine state Secret %s/%s: %w", network.Spec.ClusterRef.Namespace, secretName, err)
+		}
 
-	state, err := decodeMachineDriverState(stateSecret.Data["extractedConfig"])
-	if err != nil {
-		return infrav1.NetworkResourceStatus{}, fmt.Errorf("decode machine state Secret %s/%s: %w", network.Spec.ClusterRef.Namespace, secretName, err)
+		state, err := decodeMachineDriverState(stateSecret.Data["extractedConfig"])
+		if err != nil {
+			return infrav1.NetworkResourceStatus{}, fmt.Errorf("decode machine state Secret %s/%s: %w", network.Spec.ClusterRef.Namespace, secretName, err)
+		}
+		return adoptableResourcesFromState(candidates[i].GetName(), state)
 	}
-	return adoptableResourcesFromState(ready[0].GetName(), state)
+	return infrav1.NetworkResourceStatus{}, fmt.Errorf("no T-Cloud machine with complete driver state is available for network adoption")
 }
 
 func adoptableResourcesFromState(machineName string, state machineDriverState) (infrav1.NetworkResourceStatus, error) {

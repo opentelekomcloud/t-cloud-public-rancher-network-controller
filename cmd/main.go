@@ -66,6 +66,13 @@ func main() {
 		setupLog.Error(err, "unable to create controller")
 		os.Exit(1)
 	}
+	bootstrapReconciler := &controller.TCloudClusterNetworkBootstrapReconciler{
+		Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Scheme: manager.GetScheme(),
+	}
+	if err := bootstrapReconciler.SetupWithManager(manager); err != nil {
+		setupLog.Error(err, "unable to create cluster network bootstrap controller")
+		os.Exit(1)
+	}
 	if err := manager.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to register health check")
 		os.Exit(1)

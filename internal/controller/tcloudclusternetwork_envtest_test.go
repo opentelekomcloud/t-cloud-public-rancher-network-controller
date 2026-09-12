@@ -57,6 +57,12 @@ func TestEnvtestManagedAndAdoptLifecycle(t *testing.T) {
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		t.Fatal(err)
 	}
+	bootstrapReconciler := &TCloudClusterNetworkBootstrapReconciler{
+		Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Scheme: scheme,
+	}
+	if err := bootstrapReconciler.SetupWithManager(manager); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
@@ -191,6 +197,71 @@ func TestEnvtestManagedAndAdoptLifecycle(t *testing.T) {
 	if len(cloud.deleted) != 3 {
 		t.Fatalf("expected all adopted resources deleted, got %#v", cloud.deleted)
 	}
+
+	cloud.resources["bootstrap-vpc"] = cloudservice.Resource{ID: "bootstrap-vpc", Name: "bootstrap-vpc"}
+	cloud.resources["bootstrap-subnet"] = cloudservice.Resource{ID: "bootstrap-subnet", Name: "bootstrap-subnet"}
+	cloud.resources["bootstrap-sg"] = cloudservice.Resource{ID: "bootstrap-sg", Name: "bootstrap-sg"}
+	bootstrapCluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": provisioningClusterGVK.GroupVersion().String(), "kind": provisioningClusterGVK.Kind,
+		"metadata": map[string]interface{}{"name": "manifest-scale", "namespace": "fleet-default"},
+		"spec": map[string]interface{}{
+			"cloudCredentialSecretName": "cattle-global-data:cc-test",
+			"rkeConfig": map[string]interface{}{
+				"machineGlobalConfig": map[string]interface{}{"cni": "calico"},
+				"machinePools": []interface{}{map[string]interface{}{
+					"name": "pool", "quantity": int64(1),
+					"machineConfigRef": map[string]interface{}{"kind": tcloudMachineConfigGVK.Kind, "name": "manifest-scale-config"},
+				}},
+			},
+		},
+	}}
+	if err := apiClient.Create(ctx, bootstrapCluster); err != nil {
+		t.Fatal(err)
+	}
+	bootstrapConfig := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": tcloudMachineConfigGVK.GroupVersion().String(), "kind": tcloudMachineConfigGVK.Kind,
+		"metadata": map[string]interface{}{
+			"name": "manifest-scale-config", "namespace": "fleet-default",
+			"ownerReferences": []interface{}{map[string]interface{}{
+				"apiVersion": provisioningClusterGVK.GroupVersion().String(), "kind": provisioningClusterGVK.Kind,
+				"name": bootstrapCluster.GetName(), "uid": string(bootstrapCluster.GetUID()),
+			}},
+		},
+		"networkScope": "machine", "vpcId": "", "subnetId": "", "secGroups": "",
+		"region": "eu-de", "projectName": "project", "endpointType": "publicURL",
+	}}
+	if err := apiClient.Create(ctx, bootstrapConfig); err != nil {
+		t.Fatal(err)
+	}
+	bootstrapMachine := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": tcloudMachineGVK.GroupVersion().String(), "kind": tcloudMachineGVK.Kind,
+		"metadata": map[string]interface{}{
+			"name": "manifest-scale-worker", "namespace": "fleet-default",
+			"labels": map[string]interface{}{clusterNameLabel: "manifest-scale"},
+		},
+	}}
+	if err := apiClient.Create(ctx, bootstrapMachine); err != nil {
+		t.Fatal(err)
+	}
+	if err := apiClient.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "manifest-scale-worker-machine-state", Namespace: "fleet-default"},
+		Data:       map[string][]byte{"extractedConfig": machineStateArchive(t, "bootstrap-vpc", "bootstrap-subnet", "bootstrap-sg", true)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 15*time.Second, func() bool {
+		currentConfig := &unstructured.Unstructured{}
+		currentConfig.SetGroupVersionKind(tcloudMachineConfigGVK)
+		if apiClient.Get(ctx, types.NamespacedName{Namespace: "fleet-default", Name: "manifest-scale-config"}, currentConfig) != nil {
+			return false
+		}
+		currentCluster := &unstructured.Unstructured{}
+		currentCluster.SetGroupVersionKind(provisioningClusterGVK)
+		if apiClient.Get(ctx, types.NamespacedName{Namespace: "fleet-default", Name: "manifest-scale"}, currentCluster) != nil {
+			return false
+		}
+		return currentConfig.Object["networkScope"] == "shared" && currentConfig.Object["vpcId"] == "bootstrap-vpc" && currentCluster.GetAnnotations()[infrav1.UIProviderAnnotation] == infrav1.TCloudProviderID
+	})
 }
 
 func eventually(t *testing.T, timeout time.Duration, check func() bool) {
