@@ -1,0 +1,26 @@
+apiVersion: infrastructure.otc.t-systems.com/v1alpha1
+kind: TCloudClusterNetwork
+metadata:
+  name: test-de-existing-network-managed-security-group
+  namespace: fleet-default
+spec:
+  clusterRef:
+    name: test-de
+    namespace: fleet-default
+  credentialSecretRef:
+    name: cc-replace-me
+    namespace: cattle-global-data
+  managementPolicy: Observe
+  region: eu-de
+  projectName: replace-me
+  network:
+    vpc:
+      id: replace-vpc-id
+    subnet:
+      id: replace-subnet-id
+    securityGroup:
+      managementPolicy: Managed
+      name: test-de-rke2
+      cni: calico
+      sshAllowedCIDRs:
+        - 203.0.113.10/32

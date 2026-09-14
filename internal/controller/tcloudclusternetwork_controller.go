@@ -255,9 +255,42 @@ func (r *TCloudClusterNetworkReconciler) reconcileObserve(ctx context.Context, n
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SubnetObservationFailed", err)
 	}
-	securityGroup, err := service.GetSecurityGroup(ctx, network.Spec.Network.SecurityGroup.ID)
-	if err != nil {
-		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupObservationFailed", err)
+	securityGroup := cloudservice.Resource{}
+	securityGroupManaged := network.Spec.Network.SecurityGroup.ManagementPolicy == infrav1.ManagementPolicyManaged
+	if securityGroupManaged {
+		if network.Status.OwnershipToken == "" {
+			if err := r.patchStatus(ctx, network, func() { network.Status.OwnershipToken = string(network.UID) }); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		name := managedName(firstNonEmpty(network.Spec.Network.SecurityGroup.Name, network.Spec.ClusterRef.Name+"-rke2"), shortToken(network.Status.OwnershipToken))
+		securityGroup, err = service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
+			ID: network.Status.Resources.SecurityGroup.ID, Name: name,
+			Description: fmt.Sprintf("Managed by T-Cloud Rancher network controller for %s/%s", network.Namespace, network.Name),
+		})
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupCreationFailed", err)
+		}
+		if network.Status.Resources.SecurityGroup.ID != securityGroup.ID {
+			if err := r.patchStatus(ctx, network, func() {
+				network.Status.Resources.SecurityGroup = infrav1.ResourceStatus{ID: securityGroup.ID, Name: securityGroup.Name, ControllerManaged: true}
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		_, err = service.EnsureSecurityGroup(ctx, cloudservice.SecurityGroupRequest{
+			ID: securityGroup.ID, Name: securityGroup.Name,
+			Rules:       cloudservice.RKE2Rules(securityGroup.ID, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs, network.Spec.Network.SecurityGroup.CNI),
+			RemoveRules: cloudservice.ObsoleteSSHRules(network.Status.AppliedSSHAllowedCIDRs, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs),
+		})
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupRulesFailed", err)
+		}
+	} else {
+		securityGroup, err = service.GetSecurityGroup(ctx, network.Spec.Network.SecurityGroup.ID)
+		if err != nil {
+			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionNetwork, "SecurityGroupObservationFailed", err)
+		}
 	}
 
 	if err := r.patchStatus(ctx, network, func() {
@@ -265,7 +298,10 @@ func (r *TCloudClusterNetworkReconciler) reconcileObserve(ctx context.Context, n
 		network.Status.Resources = infrav1.NetworkResourceStatus{
 			VPC:           infrav1.ResourceStatus{ID: vpc.ID, Name: vpc.Name},
 			Subnet:        infrav1.ResourceStatus{ID: subnet.ID, Name: subnet.Name},
-			SecurityGroup: infrav1.ResourceStatus{ID: securityGroup.ID, Name: securityGroup.Name},
+			SecurityGroup: infrav1.ResourceStatus{ID: securityGroup.ID, Name: securityGroup.Name, ControllerManaged: securityGroupManaged},
+		}
+		if securityGroupManaged {
+			network.Status.AppliedSSHAllowedCIDRs = append([]string(nil), network.Spec.Network.SecurityGroup.SSHAllowedCIDRs...)
 		}
 		meta.SetStatusCondition(&network.Status.Conditions, metav1.Condition{
 			Type: infrav1.ConditionNetwork, Status: metav1.ConditionTrue, Reason: "ResourcesObserved", Message: "Existing network resources were found",
@@ -286,7 +322,11 @@ func (r *TCloudClusterNetworkReconciler) reconcileDelete(ctx context.Context, ne
 	if !controllerutil.ContainsFinalizer(network, infrav1.NetworkFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	if network.Spec.ManagementPolicy == infrav1.ManagementPolicyObserve || network.Spec.ManagementPolicy == infrav1.ManagementPolicyAbandon {
+	if network.Spec.ManagementPolicy == infrav1.ManagementPolicyAbandon {
+		return ctrl.Result{}, r.removeFinalizer(ctx, network)
+	}
+	managedResources := network.Status.Resources
+	if !managedResources.VPC.ControllerManaged && !managedResources.Subnet.ControllerManaged && !managedResources.SecurityGroup.ControllerManaged {
 		return ctrl.Result{}, r.removeFinalizer(ctx, network)
 	}
 
@@ -303,7 +343,10 @@ func (r *TCloudClusterNetworkReconciler) reconcileDelete(ctx context.Context, ne
 	if err != nil {
 		return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionDeleting, "CredentialsInvalid", err)
 	}
-	if network.Status.Resources.Subnet.ID != "" {
+	// A managed subnet must be empty before it can be deleted. An observed
+	// subnet may contain unrelated ports, so it must not gate cleanup of only a
+	// controller-managed security group.
+	if network.Status.Resources.Subnet.ControllerManaged && network.Status.Resources.Subnet.ID != "" {
 		ports, err := service.AttachedPorts(ctx, network.Status.Resources.Subnet.ID)
 		if err != nil {
 			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionDeleting, "PortLookupFailed", err)
@@ -314,7 +357,7 @@ func (r *TCloudClusterNetworkReconciler) reconcileDelete(ctx context.Context, ne
 		}
 	}
 
-	if network.Status.Resources.SecurityGroup.ID != "" {
+	if network.Status.Resources.SecurityGroup.ControllerManaged && network.Status.Resources.SecurityGroup.ID != "" {
 		if err := r.verifySecurityGroupOwnership(ctx, network, service); err != nil {
 			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionOwnership, "OwnershipMismatch", err)
 		}
@@ -323,7 +366,7 @@ func (r *TCloudClusterNetworkReconciler) reconcileDelete(ctx context.Context, ne
 		}
 		return ctrl.Result{Requeue: true}, r.patchStatus(ctx, network, func() { network.Status.Resources.SecurityGroup = infrav1.ResourceStatus{} })
 	}
-	if network.Status.Resources.Subnet.ID != "" {
+	if network.Status.Resources.Subnet.ControllerManaged && network.Status.Resources.Subnet.ID != "" {
 		if err := r.verifySubnetOwnership(ctx, network, service); err != nil {
 			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionOwnership, "OwnershipMismatch", err)
 		}
@@ -332,7 +375,7 @@ func (r *TCloudClusterNetworkReconciler) reconcileDelete(ctx context.Context, ne
 		}
 		return ctrl.Result{Requeue: true}, r.patchStatus(ctx, network, func() { network.Status.Resources.Subnet = infrav1.ResourceStatus{} })
 	}
-	if network.Status.Resources.VPC.ID != "" {
+	if network.Status.Resources.VPC.ControllerManaged && network.Status.Resources.VPC.ID != "" {
 		if err := r.verifyVPCOwnership(ctx, network, service); err != nil {
 			return ctrl.Result{}, r.fail(ctx, network, infrav1.ConditionOwnership, "OwnershipMismatch", err)
 		}

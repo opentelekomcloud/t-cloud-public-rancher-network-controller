@@ -78,7 +78,7 @@ func (r *TCloudClusterNetworkBootstrapReconciler) Reconcile(ctx context.Context,
 			if !apierrors.IsAlreadyExists(err) {
 				return ctrl.Result{}, err
 			}
-		} else if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, infrav1.ManagementPolicyAdopt, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs); err != nil {
+		} else if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, infrav1.ManagementPolicyAdopt, network.Spec.Network.SecurityGroup); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: bootstrapRetryInterval}, nil
@@ -99,7 +99,7 @@ func (r *TCloudClusterNetworkBootstrapReconciler) Reconcile(ctx context.Context,
 			return ctrl.Result{}, err
 		}
 	}
-	if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, network.Spec.ManagementPolicy, network.Spec.Network.SecurityGroup.SSHAllowedCIDRs); err != nil {
+	if err := r.patchClusterNetworkAnnotations(ctx, cluster, name, network.Spec.ManagementPolicy, network.Spec.Network.SecurityGroup); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
@@ -311,7 +311,7 @@ func (r *TCloudClusterNetworkBootstrapReconciler) ensureProviderAnnotation(ctx c
 	return r.Patch(ctx, cluster, client.MergeFrom(base))
 }
 
-func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations(ctx context.Context, cluster *unstructured.Unstructured, name string, policy infrav1.ManagementPolicy, sshAllowedCIDRs []string) error {
+func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations(ctx context.Context, cluster *unstructured.Unstructured, name string, policy infrav1.ManagementPolicy, securityGroup infrav1.SecurityGroupSpec) error {
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(provisioningClusterGVK)
 	if err := r.Get(ctx, client.ObjectKeyFromObject(cluster), current); err != nil {
@@ -321,8 +321,14 @@ func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	sshAllowedCIDRsValue := strings.Join(sshAllowedCIDRs, ",")
-	if annotations[infrav1.ClusterAnnotation] == name && annotations[infrav1.NetworkPolicyAnnotation] == string(policy) && annotations[infrav1.UIProviderAnnotation] == infrav1.TCloudProviderID && annotations[infrav1.SSHAllowedCIDRsAnnotation] == sshAllowedCIDRsValue {
+	sshAllowedCIDRsValue := strings.Join(securityGroup.SSHAllowedCIDRs, ",")
+	securityGroupPolicy := securityGroup.ManagementPolicy
+	if securityGroupPolicy == "" {
+		securityGroupPolicy = networkSecurityGroupPolicy(policy)
+	}
+	securityGroupPolicyValue := string(securityGroupPolicy)
+	securityGroupName := securityGroup.Name
+	if annotations[infrav1.ClusterAnnotation] == name && annotations[infrav1.NetworkPolicyAnnotation] == string(policy) && annotations[infrav1.UIProviderAnnotation] == infrav1.TCloudProviderID && annotations[infrav1.SSHAllowedCIDRsAnnotation] == sshAllowedCIDRsValue && annotations[infrav1.SecurityGroupPolicyAnnotation] == securityGroupPolicyValue && annotations[infrav1.SecurityGroupNameAnnotation] == securityGroupName {
 		return nil
 	}
 	base := current.DeepCopy()
@@ -330,8 +336,17 @@ func (r *TCloudClusterNetworkBootstrapReconciler) patchClusterNetworkAnnotations
 	annotations[infrav1.NetworkPolicyAnnotation] = string(policy)
 	annotations[infrav1.UIProviderAnnotation] = infrav1.TCloudProviderID
 	annotations[infrav1.SSHAllowedCIDRsAnnotation] = sshAllowedCIDRsValue
+	annotations[infrav1.SecurityGroupPolicyAnnotation] = securityGroupPolicyValue
+	annotations[infrav1.SecurityGroupNameAnnotation] = securityGroupName
 	current.SetAnnotations(annotations)
 	return r.Patch(ctx, current, client.MergeFrom(base))
+}
+
+func networkSecurityGroupPolicy(policy infrav1.ManagementPolicy) infrav1.ManagementPolicy {
+	if policy == infrav1.ManagementPolicyManaged || policy == infrav1.ManagementPolicyAdopt {
+		return infrav1.ManagementPolicyManaged
+	}
+	return infrav1.ManagementPolicyObserve
 }
 
 func networkObjectName(clusterName string) string {

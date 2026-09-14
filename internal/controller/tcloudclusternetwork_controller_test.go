@@ -330,6 +330,58 @@ func TestObservePolicyNeverDeletesResources(t *testing.T) {
 	}
 }
 
+func TestObserveNetworkCreatesAndDeletesOnlyManagedSecurityGroup(t *testing.T) {
+	ctx := context.Background()
+	reconciler, kubeClient, cloud := testReconciler(t, infrav1.ManagementPolicyObserve)
+	cloud.resources["existing-vpc"] = cloudservice.Resource{ID: "existing-vpc", Name: "existing-vpc"}
+	cloud.resources["existing-subnet"] = cloudservice.Resource{ID: "existing-subnet", Name: "existing-subnet"}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: "test-de-network", Namespace: "fleet-default"}}
+	network := &infrav1.TCloudClusterNetwork{}
+	if err := kubeClient.Get(ctx, request.NamespacedName, network); err != nil {
+		t.Fatal(err)
+	}
+	network.Spec.Network.SecurityGroup = infrav1.SecurityGroupSpec{
+		Name: "test-de-rke2", ManagementPolicy: infrav1.ManagementPolicyManaged,
+		CNI: "calico", SSHAllowedCIDRs: []string{"203.0.113.10/32"},
+	}
+	if err := kubeClient.Update(ctx, network); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUntilReady(t, ctx, reconciler, kubeClient, request)
+
+	if err := kubeClient.Get(ctx, request.NamespacedName, network); err != nil {
+		t.Fatal(err)
+	}
+	if network.Status.Resources.VPC.ControllerManaged || network.Status.Resources.Subnet.ControllerManaged || !network.Status.Resources.SecurityGroup.ControllerManaged {
+		t.Fatalf("unexpected hybrid ownership: %#v", network.Status.Resources)
+	}
+	managedSecurityGroupID := network.Status.Resources.SecurityGroup.ID
+	if managedSecurityGroupID == "" {
+		t.Fatal("managed security group was not created")
+	}
+	// Unrelated ports in the observed subnet must not block deletion of the
+	// controller-owned security group.
+	cloud.ports = 5
+	if err := kubeClient.Delete(ctx, network); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		_, err := reconciler.Reconcile(ctx, request)
+		if err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
+	}
+	if len(cloud.deleted) != 1 || cloud.deleted[0] != managedSecurityGroupID {
+		t.Fatalf("hybrid cleanup touched resources other than the managed security group: %#v", cloud.deleted)
+	}
+	if _, found := cloud.resources["existing-vpc"]; !found {
+		t.Fatal("existing VPC was deleted")
+	}
+	if _, found := cloud.resources["existing-subnet"]; !found {
+		t.Fatal("existing subnet was deleted")
+	}
+}
+
 func TestAdoptMachineManagedNetwork(t *testing.T) {
 	ctx := context.Background()
 	reconciler, kubeClient, cloud := testReconciler(t, infrav1.ManagementPolicyAdopt)

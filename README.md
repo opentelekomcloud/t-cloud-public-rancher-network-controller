@@ -115,6 +115,18 @@ kubectl delete crd tcloudclusternetworks.infrastructure.otc.t-systems.com
 
 Removing the controller or CRD first prevents managed cloud-network cleanup.
 
+### Existing network with a managed security group
+
+An existing VPC and subnet can be combined with a security group created by
+the controller. Set the network-level policy to `Observe`, provide the VPC and
+subnet IDs, and set `network.securityGroup.managementPolicy` to `Managed` with
+a name, CNI, and at least one SSH CIDR. See the
+[hybrid network sample](config/samples/infrastructure_v1alpha1_tcloudclusternetwork_existing_managed_security_group.yaml).
+
+In this hybrid mode the controller never modifies or deletes the VPC or subnet.
+It creates the CNI-specific intra-cluster rules and one TCP/22 rule per SSH CIDR,
+and deletes only its managed security group when the cluster network is deleted.
+
 ## Deletion and recovery
 
 During deletion the controller waits for Rancher T-Cloud machine objects and

@@ -5,19 +5,21 @@ import (
 )
 
 const (
-	NetworkFinalizer          = "infrastructure.otc.t-systems.com/network-cleanup"
-	ClusterAnnotation         = "infrastructure.otc.t-systems.com/cluster-network"
-	NetworkPolicyAnnotation   = "infrastructure.otc.t-systems.com/network-policy"
-	UIProviderAnnotation      = "ui.rancher/provider"
-	TCloudProviderID          = "opentelekomcloud"
-	SSHAllowedCIDRsAnnotation = "infrastructure.otc.t-systems.com/ssh-allowed-cidrs"
-	ConditionReady            = "Ready"
-	ConditionCredentials      = "CredentialsReady"
-	ConditionNetwork          = "NetworkReady"
-	ConditionDeleting         = "Deleting"
-	ConditionOwnerBound       = "OwnerBound"
-	ConditionOwnership        = "OwnershipVerified"
-	DefaultOrphanTimeout      = "1h"
+	NetworkFinalizer              = "infrastructure.otc.t-systems.com/network-cleanup"
+	ClusterAnnotation             = "infrastructure.otc.t-systems.com/cluster-network"
+	NetworkPolicyAnnotation       = "infrastructure.otc.t-systems.com/network-policy"
+	UIProviderAnnotation          = "ui.rancher/provider"
+	TCloudProviderID              = "opentelekomcloud"
+	SSHAllowedCIDRsAnnotation     = "infrastructure.otc.t-systems.com/ssh-allowed-cidrs"
+	SecurityGroupPolicyAnnotation = "infrastructure.otc.t-systems.com/security-group-policy"
+	SecurityGroupNameAnnotation   = "infrastructure.otc.t-systems.com/security-group-name"
+	ConditionReady                = "Ready"
+	ConditionCredentials          = "CredentialsReady"
+	ConditionNetwork              = "NetworkReady"
+	ConditionDeleting             = "Deleting"
+	ConditionOwnerBound           = "OwnerBound"
+	ConditionOwnership            = "OwnershipVerified"
+	DefaultOrphanTimeout          = "1h"
 )
 
 type ManagementPolicy string
@@ -58,6 +60,11 @@ type SubnetSpec struct {
 type SecurityGroupSpec struct {
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
+	// ManagementPolicy controls only the security group when the network-level
+	// policy is Observe. Managed creates and cleans up the group; Observe uses an
+	// existing group without modifying it.
+	// +kubebuilder:validation:Enum=Managed;Observe
+	ManagementPolicy ManagementPolicy `json:"managementPolicy,omitempty"`
 	// +kubebuilder:validation:items:Format=cidr
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
@@ -74,7 +81,7 @@ type NetworkSpec struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Managed' || (has(self.network.vpc.cidr) && has(self.network.subnet.cidr) && has(self.network.subnet.gatewayIP) && size(self.network.securityGroup.sshAllowedCIDRs) > 0)",message="Managed policy requires VPC CIDR, subnet CIDR, gatewayIP, and at least one SSH allowed CIDR"
-// +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Observe' || (has(self.network.vpc.id) && has(self.network.subnet.id) && has(self.network.securityGroup.id))",message="Observe policy requires VPC, subnet, and security-group IDs"
+// +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Observe' || (has(self.network.vpc.id) && has(self.network.subnet.id) && ((!has(self.network.securityGroup.managementPolicy) || self.network.securityGroup.managementPolicy == 'Observe') ? has(self.network.securityGroup.id) : (self.network.securityGroup.managementPolicy == 'Managed' && !has(self.network.securityGroup.id) && has(self.network.securityGroup.name) && size(self.network.securityGroup.sshAllowedCIDRs) > 0)))",message="Observe policy requires VPC and subnet IDs plus either an existing security-group ID or a managed security-group name and SSH CIDRs"
 // +kubebuilder:validation:XValidation:rule="self.managementPolicy != 'Adopt' || (size(self.network.securityGroup.sshAllowedCIDRs) > 0)",message="Adopt policy requires at least one SSH allowed CIDR"
 // +kubebuilder:validation:XValidation:rule="self.clusterRef == oldSelf.clusterRef",message="clusterRef is immutable"
 // +kubebuilder:validation:XValidation:rule="self.region == oldSelf.region",message="region is immutable"

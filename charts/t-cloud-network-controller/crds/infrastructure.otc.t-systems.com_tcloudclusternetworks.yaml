@@ -106,6 +106,15 @@ spec:
                         type: string
                       id:
                         type: string
+                      managementPolicy:
+                        description: |-
+                          ManagementPolicy controls only the security group when the network-level
+                          policy is Observe. Managed creates and cleans up the group; Observe uses an
+                          existing group without modifying it.
+                        enum:
+                        - Managed
+                        - Observe
+                        type: string
                       name:
                         type: string
                       sshAllowedCIDRs:
@@ -172,9 +181,14 @@ spec:
               rule: self.managementPolicy != 'Managed' || (has(self.network.vpc.cidr)
                 && has(self.network.subnet.cidr) && has(self.network.subnet.gatewayIP)
                 && size(self.network.securityGroup.sshAllowedCIDRs) > 0)
-            - message: Observe policy requires VPC, subnet, and security-group IDs
-              rule: self.managementPolicy != 'Observe' || (has(self.network.vpc.id)
-                && has(self.network.subnet.id) && has(self.network.securityGroup.id))
+            - message: Observe policy requires VPC and subnet IDs plus either an existing
+                security-group ID or a managed security-group name and SSH CIDRs
+              rule: 'self.managementPolicy != ''Observe'' || (has(self.network.vpc.id)
+                && has(self.network.subnet.id) && ((!has(self.network.securityGroup.managementPolicy)
+                || self.network.securityGroup.managementPolicy == ''Observe'') ? has(self.network.securityGroup.id)
+                : (self.network.securityGroup.managementPolicy == ''Managed'' && !has(self.network.securityGroup.id)
+                && has(self.network.securityGroup.name) && size(self.network.securityGroup.sshAllowedCIDRs)
+                > 0)))'
             - message: Adopt policy requires at least one SSH allowed CIDR
               rule: self.managementPolicy != 'Adopt' || (size(self.network.securityGroup.sshAllowedCIDRs)
                 > 0)
