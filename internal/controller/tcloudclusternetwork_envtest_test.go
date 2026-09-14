@@ -99,6 +99,30 @@ func TestEnvtestManagedAndAdoptLifecycle(t *testing.T) {
 	if err := apiClient.Create(ctx, invalidCIDRs); !apierrors.IsInvalid(err) {
 		t.Fatalf("duplicate SSH CIDRs should be rejected, got %v", err)
 	}
+	missingExistingSecurityGroup := invalidCIDRs.DeepCopy()
+	missingExistingSecurityGroup.Name = "missing-existing-security-group"
+	missingExistingSecurityGroup.Spec.ManagementPolicy = infrav1.ManagementPolicyObserve
+	missingExistingSecurityGroup.Spec.Network = infrav1.NetworkSpec{
+		VPC:    infrav1.VPCSpec{ID: "existing-vpc"},
+		Subnet: infrav1.SubnetSpec{ID: "existing-subnet"},
+		SecurityGroup: infrav1.SecurityGroupSpec{
+			ManagementPolicy: infrav1.ManagementPolicyObserve,
+		},
+	}
+	if err := apiClient.Create(ctx, missingExistingSecurityGroup, &client.CreateOptions{DryRun: []string{metav1.DryRunAll}}); !apierrors.IsInvalid(err) {
+		t.Fatalf("Observe security group without an ID should be rejected, got %v", err)
+	}
+	hybrid := missingExistingSecurityGroup.DeepCopy()
+	hybrid.Name = "hybrid-managed-security-group"
+	hybrid.Spec.Network.SecurityGroup = infrav1.SecurityGroupSpec{
+		Name:             "hybrid-rke2",
+		ManagementPolicy: infrav1.ManagementPolicyManaged,
+		CNI:              "calico",
+		SSHAllowedCIDRs:  []string{"203.0.113.5/32"},
+	}
+	if err := apiClient.Create(ctx, hybrid, &client.CreateOptions{DryRun: []string{metav1.DryRunAll}}); err != nil {
+		t.Fatalf("Observe network with a managed security group should be valid, got %v", err)
+	}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "cc-test", Namespace: "cattle-global-data"}, Data: map[string][]byte{
 		"opentelekomcloudcredentialConfig-authUrl":    []byte("https://iam.example/v3"),
 		"opentelekomcloudcredentialConfig-username":   []byte("user"),
