@@ -2,6 +2,6 @@ apiVersion: v2
 name: t-cloud-network-controller
 description: Cluster-scoped shared network lifecycle controller for Rancher and T-Cloud
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 1.0.0
+appVersion: "1.0.0"
 icon: https://raw.githubusercontent.com/opentelekomcloud/t-cloud-public-node-driver-extension/main/pkg/opentelekomcloud/assets/icon-opentelekomcloud.svg
