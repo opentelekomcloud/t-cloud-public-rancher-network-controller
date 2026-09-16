@@ -44,7 +44,6 @@ func TestCredentialsFromSecretAKSK(t *testing.T) {
 			credentialPrefix + "authUrl":    []byte("https://iam.example/v3"),
 			credentialPrefix + "accessKey":  []byte("access-key"),
 			credentialPrefix + "secretKey":  []byte("secret-key"),
-			credentialPrefix + "domainName": []byte("domain"),
 			credentialPrefix + "projectId":  []byte("project-id"),
 			credentialPrefix + "region":     []byte("eu-de"),
 		},
@@ -57,18 +56,20 @@ func TestCredentialsFromSecretAKSK(t *testing.T) {
 	if credentials.AuthMethod != "aksk" || credentials.AccessKey != "access-key" || credentials.SecretKey != "secret-key" {
 		t.Fatal("unexpected AK/SK credentials")
 	}
+	if credentials.DomainName != "" || credentials.DomainID != "" {
+		t.Fatal("AK/SK credentials unexpectedly require a domain")
+	}
 }
 
 func TestCredentialsFromSecretInfersAKSK(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "credential", Namespace: "cattle-global-data"},
 		Data: map[string][]byte{
-			credentialPrefix + "authUrl":    []byte("https://iam.example/v3"),
-			credentialPrefix + "accessKey":  []byte("access-key"),
-			credentialPrefix + "secretKey":  []byte("secret-key"),
-			credentialPrefix + "domainName": []byte("domain"),
-			credentialPrefix + "projectId":  []byte("project-id"),
-			credentialPrefix + "region":     []byte("eu-de"),
+			credentialPrefix + "authUrl":   []byte("https://iam.example/v3"),
+			credentialPrefix + "accessKey": []byte("access-key"),
+			credentialPrefix + "secretKey": []byte("secret-key"),
+			credentialPrefix + "projectId": []byte("project-id"),
+			credentialPrefix + "region":    []byte("eu-de"),
 		},
 	}
 
@@ -78,6 +79,25 @@ func TestCredentialsFromSecretInfersAKSK(t *testing.T) {
 	}
 	if credentials.AuthMethod != "aksk" {
 		t.Fatalf("unexpected authentication method: %q", credentials.AuthMethod)
+	}
+}
+
+func TestCredentialsFromSecretPasswordRequiresDomain(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "credential", Namespace: "cattle-global-data"},
+		Data: map[string][]byte{
+			credentialPrefix + "authMethod": []byte("password"),
+			credentialPrefix + "authUrl":    []byte("https://iam.example/v3"),
+			credentialPrefix + "username":   []byte("user"),
+			credentialPrefix + "password":   []byte("secret-value"),
+			credentialPrefix + "projectId":  []byte("project-id"),
+			credentialPrefix + "region":     []byte("eu-de"),
+		},
+	}
+
+	_, err := CredentialsFromSecret(secret, "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "has no domain") {
+		t.Fatalf("expected missing domain error, got %v", err)
 	}
 }
 

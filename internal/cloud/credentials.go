@@ -51,7 +51,7 @@ func CredentialsFromSecret(secret *corev1.Secret, fallbackRegion, fallbackProjec
 	default:
 		return Credentials{}, fmt.Errorf("cloud credential secret %s/%s has unsupported authentication method %q", secret.Namespace, secret.Name, credentials.AuthMethod)
 	}
-	if credentials.DomainName == "" && credentials.DomainID == "" {
+	if credentials.AuthMethod == "password" && credentials.DomainName == "" && credentials.DomainID == "" {
 		return Credentials{}, fmt.Errorf("cloud credential secret %s/%s has no domain", secret.Namespace, secret.Name)
 	}
 	if credentials.Region == "" {
