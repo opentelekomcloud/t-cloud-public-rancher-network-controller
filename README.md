@@ -169,3 +169,12 @@ dedicated Rancher cloud credential:
 
 Never use `Abandon` as the normal uninstall path: it deliberately leaves cloud
 resources behind.
+
+## With Rancher
+
+For a single end-to-end walkthrough covering T-Cloud Public driver, the
+[T-Cloud Public Rancher UI extension](https://github.com/opentelekomcloud/t-cloud-public-node-driver-extension),
+and the
+[T-Cloud Public Rancher network controller](https://github.com/opentelekomcloud/t-cloud-public-rancher-network-controller)
+together - including screenshots - see
+[RANCHER-GETTING-STARTED.md](RANCHER-GETTING-STARTED.md).
